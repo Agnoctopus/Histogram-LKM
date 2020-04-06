@@ -32,3 +32,5 @@ test:
 
 doc:
 	doxygen
+
+PHONY: all modules clean load unload doc test
