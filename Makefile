@@ -5,7 +5,7 @@ obj-m = histogram.o
 KVERSION = $(shell uname -r)
 MODDIR = /lib/modules/$(KVERSION)/build
 
-KOBJ = $(modname).ko
+MOD = $(modname).ko
 
 all:
 	make -C $(MODDIR) M=$(PWD) modules
@@ -14,14 +14,14 @@ clean:
 	make -C $(MODDIR) M=$(PWD) clean
 
 load:
-	-rmmod $(KOBJ)
-	insmod $(KOBJ).ko
+	-rmmod $(MOD)
+	insmod $(MOD)
 
 unload:
-	-rmmod $(KOBJ)
+	-rmmod $(MOD)
 
 test:
-	-rmmod $(KOBJ).ko
+	-sudo rmmod $(MOD)
 	sudo dmesg -C
-	sudo insmod $(KOBJ).ko
+	sudo insmod $(MOD)
 	dmesg
