@@ -1,5 +1,7 @@
+# kbuild information
 modname = histogram
-obj-m = histogram.o
+obj-m = $(modname).o
+$(modname)-y =
 
 
 KVERSION = $(shell uname -r)
@@ -12,7 +14,7 @@ MOD = $(modname).ko
 all: modules
 
 modules:
-	make -C $(KDIR) M=$(PWD) modules
+	make -C $(KDIR) M=$(PWD) $(MOD)
 
 clean:
 	make -C $(KDIR) M=$(PWD) clean
@@ -32,5 +34,13 @@ test:
 
 doc:
 	doxygen
+
+install:
+	make -C $(KDIR) M=$(PWD) modules_install
+	modprobe $(modname)
+
+uninstall:
+	modprobe -r histogram
+	$(RM) $(KDIR)/extra/$(modname)
 
 PHONY: all modules clean load unload doc test
