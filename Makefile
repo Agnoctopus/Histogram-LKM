@@ -25,3 +25,6 @@ test:
 	sudo dmesg -C
 	sudo insmod $(MOD)
 	dmesg
+
+doc:
+	doxygen
