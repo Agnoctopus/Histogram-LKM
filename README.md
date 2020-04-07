@@ -33,6 +33,10 @@ To install the module (run as root):
 To view the histogram:
 ```shell
 $ cat /sys/kernel/debugfs/histogram/histogram
+not: 1
+to: 2
+or: 1
+be: 2
 ```
 
 To get the module info:
