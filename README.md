@@ -1,15 +1,15 @@
 Histogram LKM
 ============
 
-Histogram is a Linux Kernel Module that provide an histogram of all
-written words since the module loading.
+Histogram is a Linux Kernel Module which provides a histogram of all
+words written since the loading of the module.
 
-Histogram works by a registering a keyboard notifier to keep tracks of
-key pressed. Only ascii characters works during this time.
+Histogram works by a registering a keyboard notifier to keep track of
+keys pressed. Only ascii characters work during this period.
 
-The histogram is available through a file in debugfs, it contain all
-words types since the Histogram LKM loading:
-/sys/kernel/debugfs/histogram/histogram. (Could be accessed in
+The histogram is available through a file in debugfs, it contains all
+words typed since the loading of the Histogram LKM:
+`/sys/kernel/debugfs/histogram/histogram` (Could be accessed in
 privileged mode).
 
 # Usage
