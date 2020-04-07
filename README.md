@@ -16,40 +16,40 @@ privileged mode).
 
 To load the module:
 ```shell
-sudo make load
+$ sudo make load
 ```
 
 To unload the module:
 ```shell
-sudo make unload
+$ sudo make unload
 ```
 
 To install the module (run as root):
 ```shell
-make install
+# make install
 ```
 > If you want to sign the module: https://wiki.gentoo.org/wiki/Signed_kernel_module_support
 
 To view the histogram:
 ```shell
-cat /sys/kernel/debugfs/histogram/histogram
+$ cat /sys/kernel/debugfs/histogram/histogram
 ```
 
 To get the module info:
 ```shell
-modinfo histogram
+$ modinfo histogram
 ```
 
 # Building
 
 Build the binary:
 ```shell
-make
+$ make
 ```
 
 Generate doc:
 ```
-make doc
+$ make doc
 ```
 
 # License
