@@ -2,6 +2,7 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/notifier.h>
 #include <linux/keyboard.h>
 #include <uapi/linux/stat.h>
 
@@ -10,7 +11,6 @@
 
 /* State */
 static struct dentry *debugfs_dir = NULL;
-static struct dentry *debugfs_file = NULL;
 
 /* LKM information */
 MODULE_LICENSE("GPL v2");
@@ -22,12 +22,23 @@ MODULE_VERSION("0.1");
 static ssize_t histogram_read(struct file *file,
         char __user *buf, size_t len, loff_t *ppos);
 
+/* Keyboard notifier function */
+static int kdb_notifier_fn(struct notifier_block *nb,
+        unsigned long action, void *data);
+
 /**
 ** \brief File operations
 */
 static struct file_operations file_ops = {
     .owner = THIS_MODULE,
     .read = histogram_read
+};
+
+/**
+** \brief Notifier block for keyboard
+*/
+struct notifier_block kbd_notifier_blk = {
+	.notifier_call = kdb_notifier_fn
 };
 
 
@@ -46,12 +57,28 @@ static ssize_t histogram_read(struct file *file,
 }
 
 /**
+** \brief Keyboard notifier handler
+**
+** \param nb The notifier block
+** \param action The action
+** \param data The data
+*/
+static int kdb_notifier_fn(struct notifier_block *nb,
+        unsigned long action, void *data)
+{
+    return 0;
+}
+
+/**
 ** \brief LKM init
 **
 ** \return LKM exit code
 */
 static int __init histogram_init(void)
 {
+    /* Debug file */
+    struct dentry *debugfs_file = NULL;
+
     /* Log */
     pr_info("histogram: init\n");
 
@@ -74,6 +101,15 @@ static int __init histogram_init(void)
         debugfs_remove_recursive(debugfs_dir);
         return -1;
     }
+    /* Register keyboard notifier */
+    if (register_keyboard_notifier(&kbd_notifier_blk) != 0)
+    {
+        /* Log */
+        pr_alert("histogram: Failed to register keyboard notifier");
+        /* Release */
+        debugfs_remove_recursive(debugfs_dir);
+        return -1;
+    }
     return 0;
 }
 
@@ -84,8 +120,10 @@ static void __exit histogram_exit(void)
 {
     /* Log */
     pr_info("histogram: exit\n");
+
+    /* Release */
+    unregister_keyboard_notifier(&kbd_notifier_blk);
     debugfs_remove_recursive(debugfs_dir);
-	debugfs_remove(debugfs_file);
 }
 
 /* Register init and exit functions */
