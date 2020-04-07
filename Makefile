@@ -38,6 +38,6 @@ doc:
 
 clean:
 	make -C $(KDIR) M=$(PWD) clean
-	$(RM) doc
+	$(RM) -rv doc
 
 .PHONY: all modules install uninstall load unload doc clean
