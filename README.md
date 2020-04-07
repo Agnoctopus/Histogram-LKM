@@ -42,6 +42,16 @@ be: 2
 To get the module info:
 ```shell
 $ modinfo histogram
+filename:       /lib/modules/5.6.2-arch1-2/extra/histogram.ko.xz
+version:        0.1
+description:    Histogram of written words.
+author:         Cesar Belley <cesar.belley@lse.epita.fr>
+license:        GPL v2
+srcversion:     2412D2C2AA86A5ADFCCA15E
+depends:
+retpoline:      Y
+name:           histogram
+vermagic:       5.6.2-arch1-2 SMP preempt mod_unload
 ```
 
 # Building
