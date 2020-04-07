@@ -1,39 +1,22 @@
-# kbuild information
+# Kbuild information
 modname = histogram
 obj-m = $(modname).o
-$(modname)-y =
 
-
+# Kernel version
 KVERSION = $(shell uname -r)
 
-# The path of the kernel source directory
+# Path of the kernel source directory
 KDIR = /lib/modules/$(KVERSION)/build
 
+# Module kernel object
 MOD = $(modname).ko
+
 
 all: modules
 
 modules:
 	make -C $(KDIR) M=$(PWD) $(MOD)
 
-clean:
-	make -C $(KDIR) M=$(PWD) clean
-
-load:
-	-rmmod $(MOD)
-	insmod $(MOD)
-
-unload:
-	-rmmod $(MOD)
-
-test:
-	-sudo rmmod $(MOD)
-	sudo dmesg -C
-	sudo insmod $(MOD)
-	dmesg
-
-doc:
-	doxygen
 
 install:
 	make -C $(KDIR) M=$(PWD) modules_install
@@ -43,4 +26,18 @@ uninstall:
 	modprobe -r histogram
 	$(RM) $(KDIR)/extra/$(modname)
 
-PHONY: all modules clean load unload doc test
+load:
+	-rmmod $(MOD)
+	insmod $(MOD)
+
+unload:
+	-rmmod $(MOD)
+
+doc:
+	doxygen
+
+clean:
+	make -C $(KDIR) M=$(PWD) clean
+	$(RM) doc
+
+.PHONY: all modules install uninstall load unload doc clean
