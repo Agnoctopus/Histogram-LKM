@@ -13,6 +13,7 @@
 #include <linux/tty.h>
 #include <linux/console_struct.h>
 
+/* Usefull definitions */
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -23,14 +24,7 @@
 /* ASCII Code */
 #define ASCII_DEL 0x7F
 
-/* State */
-static struct dentry *debugfs_dir = NULL;
-static char kbd_buffer[STR_MAX_LEN] = { 0 };
-static size_t kbd_buffer_pos = 0;
-static int device_open_count = 0;
-static char *histogram_string = NULL;
-
-/* LKM information */
+/* LKM informations */
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Cesar Belley <cesar.belley@lse.epita.fr>");
 MODULE_DESCRIPTION("Histogram of written words.");
@@ -39,11 +33,6 @@ MODULE_VERSION("0.1");
 /* File operations functions */
 static ssize_t histogram_read(struct file *file,
         char __user *buf, size_t len, loff_t *ppos);
-
-/* Keyboard notifier function */
-static int kbd_notifier_fn(struct notifier_block *nb,
-        unsigned long action, void *data);
-
 static int histogram_open(struct inode *inode, struct file* file);
 static int histogram_release(struct inode *inode, struct file *file);
 
@@ -57,24 +46,16 @@ static struct file_operations file_ops = {
     .release = histogram_release
 };
 
+/* Keyboard notifier function */
+static int kbd_notifier_fn(struct notifier_block *nb,
+        unsigned long action, void *data);
+
 /**
 ** \brief Notifier block for keyboard
 */
 struct notifier_block kbd_notifier_blk = {
 	.notifier_call = kbd_notifier_fn
 };
-
-/**
-** \brief Check if a char can be considered as a word
-*/
-static bool is_word(char c)
-{
-    return c != '\x01'
-        && c != '\n'
-        && c != '\r'
-        && c != ' '
-        && c != '\t';
-}
 
 /**
 ** \brief The hash_table_item <char*,int> representation
@@ -95,7 +76,40 @@ struct hash_table
     size_t buckets_nb; /** The number of buckets */
 };
 
+/* State */
+static struct dentry *debugfs_dir = NULL;
+static char kbd_buffer[STR_MAX_LEN] = { 0 };
+static size_t kbd_buffer_pos = 0;
+static int device_open_count = 0;
+static char *histogram_string = NULL;
 struct hash_table *histogram = NULL;
+
+/**
+** \brief Check if a char can be considered as a word
+**
+** \param c The char
+** \return true if can be considered as word, else false
+*/
+static bool is_word(char c)
+{
+    return c != '\x01'
+        && c != '\n'
+        && c != '\r'
+        && c != ' '
+        && c != '\t';
+}
+
+/**
+** \brief Check if a char can be considered as a printable ascii
+**
+** \param c The char
+** \return true if can be considered as a printable ascii, else false
+*/
+static bool is_printable_ascii(char c)
+{
+    return c >= '!'
+        && c <= '~';
+}
 
 /**
 ** \brief Check if to string are equal
@@ -136,12 +150,17 @@ static size_t strlen(const char *str)
 */
 static char *strdup(const char *str)
 {
+    /* Variables */
     size_t i = 0;
     /* Allocate */
     size_t length = strlen(str);
     char *str_cpy = kmalloc(length + 1, GFP_KERNEL);
+    if (str_cpy == NULL)
+        return NULL;
+    /* Loop though string */
     for (; i < length; ++i)
         str_cpy[i] = str[i];
+    /* Null terminated */
     str_cpy[length] = 0;
     return str_cpy;
 }
@@ -150,7 +169,6 @@ static char *strdup(const char *str)
 ** \brief Jenkins hash function
 **
 ** \param key The key to hash
-** \param length The key length
 ** \return The u32 hash
 */
 static uint32_t hash_function(const char *key)
@@ -179,12 +197,12 @@ static uint32_t hash_function(const char *key)
 */
 static struct hash_table *ht_init(size_t buckets_nb)
 {
-    /* Allocate hashset */
+    /* Allocate hash table */
     struct hash_table *hash_table =
             kmalloc(sizeof(struct hash_table), GFP_KERNEL);
     if (hash_table == NULL)
         return NULL;
-    /* Allocate hashset slots*/
+    /* Allocate hash table buckets */
     hash_table->buckets = kcalloc(buckets_nb,
             sizeof(struct hash_table_item *), GFP_KERNEL);
     if (hash_table->buckets == NULL)
@@ -260,7 +278,6 @@ static struct hash_table_item *ht_new_item(char *key, int value)
     return node;
 }
 
-
 /**
 ** \brief Find the item associated with a key is in a bucket
 **
@@ -284,15 +301,16 @@ static struct hash_table_item *ht_bucket_find(
 
 /**
 ** \brief Increment a value indexed by a key in the hash table.
-**        If the value is not present, set it to 0 and increment it.
+**        If the value is not present, set it to 0 and increment it
 **
 ** \param ht The hash table
 ** \param key The key
 */
-static void ht_incr(struct hash_table *ht, char *key)
+static void ht_incr(struct hash_table *ht, const char *key)
 {
-    /* New item */
+    /* Variables */
     struct hash_table_item *item_new = NULL;
+    char *key_cpy = NULL;
     /* Computed the index */
     size_t index = hash_function(key) % ht->buckets_nb;
     struct hash_table_item **bucket_ref = ht->buckets + index;
@@ -306,52 +324,89 @@ static void ht_incr(struct hash_table *ht, char *key)
     }
 
     /* New item */
-    item_new = ht_new_item(key, 1);
+    key_cpy = strdup(kbd_buffer);
+    if (key_cpy == NULL)
+        return;
+    item_new = ht_new_item(key_cpy, 1);
+    if (item_new == NULL)
+    {
+        kfree(key_cpy);
+        return;
+    }
+    /* Pointer move */
     item_new->next = *bucket_ref;
     *bucket_ref = item_new;
 }
 
-static void ht_dump(const struct hash_table *ht)
+/**
+** \brief Keyboard keysym action handler
+**
+** \param value The keysym action value
+*/
+static void kdb_handle_keysym(unsigned int value)
 {
-    size_t i = 0;
-    struct hash_table_item *item = NULL;
-    for (; i < ht->buckets_nb; ++i)
+    /* Cast to character */
+    char c = (char)value;
+
+    /* Del touch */
+    if (c == ASCII_DEL)
     {
-        /* Bucket number */
-        pr_info("[%zu] = ", i + 1);
-
-        /* Empty bucket */
-        if (ht->buckets[i] == NULL)
-            continue;
-
-        /* Loop through bucket */
-        item = ht->buckets[i];
-        while (item->next != NULL)
-        {
-            pr_info("%s (%d) -> ", item->key, item->value);
-            item = item->next;
-        }
-        pr_info("%s (%d)", item->key, item->value);
+        if (kbd_buffer_pos > 0)
+            --kbd_buffer_pos;
+        return;
     }
+
+    /* Word switch */
+    if (is_word(c))
+    {
+        if (is_printable_ascii(c))
+            kbd_buffer[kbd_buffer_pos++] = c;
+    }
+    else if (kbd_buffer_pos != 0)
+    {
+        /* A word is in the buffer, incr it */
+        /* Null terminated */
+        kbd_buffer[kbd_buffer_pos] = 0;
+        ht_incr(histogram, kbd_buffer);
+        kbd_buffer_pos = 0;
+    }
+    /* Kdb buffer length check */
+    if (kbd_buffer_pos + 1 >= STR_MAX_LEN)
+        kbd_buffer_pos = 0;
 }
 
 /**
-** \brief Read the histogram
+** \brief Keyboard action handler
 **
-** \param file The file
-** \param bug The read buffer
-** \param len The length of the read buffer
-** \param ppos the position in the file
+** \param action The action
+** \param value The associated value
+** \return 1 if the action was treated, 0 if ignored
 */
-static ssize_t histogram_read(struct file *file,
-        char __user *buf, size_t len, loff_t *ppos)
+static int kdb_handle_action(unsigned long action, unsigned int value)
 {
-    /* Log */
-    pr_debug("histogram: read");
+    /* Switch all possibles actions */
+    switch (action)
+    {
+    case KBD_KEYCODE:
+        pr_debug("histogram: keycode");
+        return 0;
+    case KBD_UNBOUND_KEYCODE:
+        pr_debug("histogram: unbound keycode");
+        return 0;
+    case KBD_KEYSYM:
+        pr_debug("histogram: keysym");
+        kdb_handle_keysym(value);
+        return 1;
+    case KBD_POST_KEYSYM:
+        pr_debug("histogram: post keysym");
+        return 0;
+    default:
+        pr_debug("histogram: default");
+        return 0;
+    }
+    /* Should not be executed */
 
-    /* Simple read */
-    return simple_read_from_buffer(buf, len, ppos,
-            histogram_string, strlen(histogram_string));
+    return 0;
 }
 
 /**
@@ -364,9 +419,8 @@ static ssize_t histogram_read(struct file *file,
 static int kbd_notifier_fn(struct notifier_block *nb,
         unsigned long action, void *data)
 {
-    char c;
     /* Get the kbd param */
-    struct keyboard_notifier_param *kbd_param = data;
+    const struct keyboard_notifier_param *kbd_param = data;
 
     /* Null data */
     if (kbd_param == NULL)
@@ -377,61 +431,33 @@ static int kbd_notifier_fn(struct notifier_block *nb,
     }
 
     /* Ensure key down */
-    if (!kbd_param->down)
+    if (kbd_param->down == 0)
         return NOTIFY_DONE;
 
-    switch (action)
-    {
-    case KBD_KEYCODE:
-        pr_debug("histogram: keycode");
-        return NOTIFY_DONE;
-    case KBD_UNBOUND_KEYCODE:
-        pr_debug("histogram: unbound keycode");
-        return NOTIFY_DONE;
-    case KBD_KEYSYM:
-        pr_debug("histogram: keysym");
-        break;
-    case KBD_POST_KEYSYM:
-        pr_debug("histogram: post keysym");
-        return NOTIFY_DONE;
-    default:
-        pr_debug("histogram: default");
-        return NOTIFY_DONE;
-    }
-    c = (char)kbd_param->value;
-
-    if (c == ASCII_DEL)
-    {
-        if (kbd_buffer_pos > 0)
-            --kbd_buffer_pos;
-    }
-    else if (is_word(c))
-    {
-        if (c >= '!' && c <= '~')
-            kbd_buffer[kbd_buffer_pos++] = c;
-    }
-    else if (kbd_buffer_pos != 0)
-    {
-        kbd_buffer[kbd_buffer_pos] = 0;
-        ht_incr(histogram, strdup(kbd_buffer));
-        kbd_buffer_pos = 0;
-    }
-    /* Kdb buffer length check */
-    if (kbd_buffer_pos + 1 >= STR_MAX_LEN)
-        kbd_buffer_pos = 0;
-
-    return NOTIFY_OK;
+    /* Handle action */
+    if (kdb_handle_action(action, kbd_param->value) == 1)
+        return NOTIFY_OK;
+    return NOTIFY_DONE;
 }
 
+/**
+** \brief Get the string representation of the histogram
+**
+** \return The string representation of the histogram
+*/
 static char *histogram_tostring(void)
 {
     /* Variables */
-    size_t i = 0;
     struct hash_table_item *item = NULL;
-    size_t space = (1 << 10);
-    char *buffer = kmalloc(space, GFP_KERNEL);
     char *buffer_tmp = NULL;
+    size_t space = (1 << 10);
     size_t index = 0;
+    size_t i = 0;
+
+    /* Main buffer */
+    char *buffer = kmalloc(space, GFP_KERNEL);
+    if (buffer == NULL)
+        return NULL;
 
     /* Loop through buckets */
     for (; i < histogram->buckets_nb; ++i)
@@ -447,15 +473,26 @@ static char *histogram_tostring(void)
             /* Add to the buffer */
             index += snprintf(buffer + index, STR_MAX_LEN,
                     "%s: %d\n", item->key, item->value);
+
+            /* Check buffer size to reallocate */
             if (index + 16 + STR_MAX_LEN >=  space)
             {
+                /* Allocate double space */
                 space *= 2;
                 buffer_tmp = kmalloc(space, GFP_KERNEL);
+                if (buffer_tmp == NULL)
+                {
+                    kfree(buffer);
+                    return NULL;
+                }
+
+                /* Copy */
                 memcpy(buffer_tmp, buffer, index);
+
+                /* Change */
                 kfree(buffer);
                 buffer = buffer_tmp;
             }
-
             item = item->next;
         }
     }
@@ -463,7 +500,31 @@ static char *histogram_tostring(void)
 }
 
 /**
-** \brief
+** \brief Read the histogram
+**
+** \param file The file
+** \param bug The read buffer
+** \param len The length of the read buffer
+** \param ppos the position in the file
+** \return The number of bytes readed
+*/
+static ssize_t histogram_read(struct file *file,
+        char __user *buf, size_t len, loff_t *ppos)
+{
+    /* Log */
+    pr_debug("histogram: read");
+
+    /* Simple read */
+    return simple_read_from_buffer(buf, len, ppos,
+            histogram_string, strlen(histogram_string));
+}
+
+/**
+** \brief Open the histogram debugfs file
+**
+** \param inode The corresponding inode
+** \param file The corresponding file
+** \return 0 on success, negative value otherwise
 */
 static int histogram_open(struct inode *inode, struct file* file)
 {
@@ -478,12 +539,18 @@ static int histogram_open(struct inode *inode, struct file* file)
 
     /* Build string */
     histogram_string = histogram_tostring();
+    if (histogram_string == NULL)
+        return -1;
 
     return 0;
 }
 
 /**
-** \brief
+** \brief Release the histogram debugfs file
+**
+** \param inode The corresponding inode
+** \param file The corresponding file
+** \return 0 on success, negative value otherwise
 */
 static int histogram_release(struct inode *inode, struct file *file)
 {
@@ -500,9 +567,9 @@ static int histogram_release(struct inode *inode, struct file *file)
 }
 
 /**
-** \brief LKM init
+** \brief Init the histogram linux kernel module
 **
-** \return LKM exit code
+** \return 0 on success, negative value otherwise
 */
 static int __init histogram_init(void)
 {
@@ -540,13 +607,26 @@ static int __init histogram_init(void)
         debugfs_remove_recursive(debugfs_dir);
         return -1;
     }
+
+    /* Histogram hash table */
     histogram = ht_init(HT_BUCKETS_NB);
+    if (histogram == NULL)
+    {
+        /* Log */
+        pr_alert("histogram: Failed to init the histogram table");
+        /* Release */
+        debugfs_remove_recursive(debugfs_dir);
+        unregister_keyboard_notifier(&kbd_notifier_blk);
+        return -1;
+    }
 
     return 0;
 }
 
 /**
-** \brief LKM exit
+** \brief Exit the histogram linux kernel module
+**
+** \return 0 on success, negative value otherwise
 */
 static void __exit histogram_exit(void)
 {
@@ -554,8 +634,8 @@ static void __exit histogram_exit(void)
     pr_info("histogram: exit\n");
 
     /* Release */
-    unregister_keyboard_notifier(&kbd_notifier_blk);
     debugfs_remove_recursive(debugfs_dir);
+    unregister_keyboard_notifier(&kbd_notifier_blk);
     ht_free(histogram);
 }
 
