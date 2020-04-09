@@ -219,12 +219,11 @@ static struct hash_table *ht_init(size_t buckets_nb)
 /**
 ** \brief Free a bucket
 **
-** \param bucket The bucket to free
+** \param item The first item of the bucket to free
 */
-static void ht_free_bucket(struct hash_table_item *bucket)
+static void ht_free_bucket(struct hash_table_item *item)
 {
     /* Get item pointers */
-    struct hash_table_item *item = bucket;
     struct hash_table_item *item_tmp = NULL;
 
     /* Loop through all the bucket */
@@ -260,7 +259,6 @@ static void ht_free(struct hash_table *ht)
 ** \brief Allocate and initialize a new hash table item
 **
 ** \param key The key
-** \param length The key length
 ** \param value The associated value indexed by the key
 */
 static struct hash_table_item *ht_new_item(char *key, int value)
@@ -382,7 +380,8 @@ static void kdb_handle_keysym(unsigned int value)
 ** \param value The associated value
 ** \return 1 if the action was treated, 0 if ignored
 */
-static int kdb_handle_action(unsigned long action, unsigned int value)
+static int kdb_handle_action(unsigned long action,
+        unsigned int value)
 {
     /* Switch all possibles actions */
     switch (action)
@@ -415,6 +414,7 @@ static int kdb_handle_action(unsigned long action, unsigned int value)
 ** \param nb The notifier block
 ** \param action The action
 ** \param data The data
+** \return notifier status
 */
 static int kbd_notifier_fn(struct notifier_block *nb,
         unsigned long action, void *data)
@@ -500,10 +500,10 @@ static char *histogram_tostring(void)
 }
 
 /**
-** \brief Read the histogram
+** \brief Read the histogram debugfs file
 **
 ** \param file The file
-** \param bug The read buffer
+** \param buf The read buffer
 ** \param len The length of the read buffer
 ** \param ppos the position in the file
 ** \return The number of bytes readed
