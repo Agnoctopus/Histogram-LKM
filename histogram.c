@@ -24,39 +24,6 @@
 /* ASCII Code */
 #define ASCII_DEL 0x7F
 
-/* LKM informations */
-MODULE_LICENSE("GPL v2");
-MODULE_AUTHOR("Cesar Belley <cesar.belley@lse.epita.fr>");
-MODULE_DESCRIPTION("Histogram of written words.");
-MODULE_VERSION("0.1");
-
-/* File operations functions */
-static ssize_t histogram_read(struct file *file,
-        char __user *buf, size_t len, loff_t *ppos);
-static int histogram_open(struct inode *inode, struct file* file);
-static int histogram_release(struct inode *inode, struct file *file);
-
-/**
-** \brief File operations
-*/
-static struct file_operations file_ops = {
-    .owner = THIS_MODULE,
-    .read = histogram_read,
-    .open = histogram_open,
-    .release = histogram_release
-};
-
-/* Keyboard notifier function */
-static int kbd_notifier_fn(struct notifier_block *nb,
-        unsigned long action, void *data);
-
-/**
-** \brief Notifier block for keyboard
-*/
-struct notifier_block kbd_notifier_blk = {
-	.notifier_call = kbd_notifier_fn
-};
-
 /**
 ** \brief The hash_table_item <char*,int> representation
 */
@@ -77,12 +44,12 @@ struct hash_table
 };
 
 /* State */
-static struct dentry *debugfs_dir = NULL;
-static char kbd_buffer[STR_MAX_LEN] = { 0 };
-static size_t kbd_buffer_pos = 0;
-static int device_open_count = 0;
-static char *histogram_string = NULL;
-struct hash_table *histogram = NULL;
+static struct dentry *debugfs_dir;
+static char kbd_buffer[STR_MAX_LEN];
+static size_t kbd_buffer_pos;
+static int device_open_count;
+static char *histogram_string;
+struct hash_table *histogram;
 
 /**
 ** \brief Check if a char can be considered as a word
@@ -90,7 +57,7 @@ struct hash_table *histogram = NULL;
 ** \param c The char
 ** \return true if can be considered as word, else false
 */
-static bool is_word(char c)
+static inline bool is_word(char c)
 {
     return c != '\x01'
         && c != '\n'
@@ -105,7 +72,7 @@ static bool is_word(char c)
 ** \param c The char
 ** \return true if can be considered as a printable ascii, else false
 */
-static bool is_printable_ascii(char c)
+static inline bool is_printable_ascii(char c)
 {
     return c >= '!'
         && c <= '~';
@@ -409,38 +376,6 @@ static int kdb_handle_action(unsigned long action,
 }
 
 /**
-** \brief Keyboard notifier handler
-**
-** \param nb The notifier block
-** \param action The action
-** \param data The data
-** \return notifier status
-*/
-static int kbd_notifier_fn(struct notifier_block *nb,
-        unsigned long action, void *data)
-{
-    /* Get the kbd param */
-    const struct keyboard_notifier_param *kbd_param = data;
-
-    /* Null data */
-    if (kbd_param == NULL)
-    {
-        /* Log */
-        pr_alert("histogram: Failed to get kbd param");
-        return NOTIFY_DONE;
-    }
-
-    /* Ensure key down */
-    if (kbd_param->down == 0)
-        return NOTIFY_DONE;
-
-    /* Handle action */
-    if (kdb_handle_action(action, kbd_param->value) == 1)
-        return NOTIFY_OK;
-    return NOTIFY_DONE;
-}
-
-/**
 ** \brief Get the string representation of the histogram
 **
 ** \return The string representation of the histogram
@@ -567,6 +502,55 @@ static int histogram_release(struct inode *inode, struct file *file)
 }
 
 /**
+** \brief File operations
+*/
+static struct file_operations file_ops = {
+    .owner = THIS_MODULE,
+    .read = histogram_read,
+    .open = histogram_open,
+    .release = histogram_release
+};
+
+/**
+** \brief Keyboard notifier handler
+**
+** \param nb The notifier block
+** \param action The action
+** \param data The data
+** \return notifier status
+*/
+static int kbd_notifier_fn(struct notifier_block *nb,
+        unsigned long action, void *data)
+{
+    /* Get the kbd param */
+    const struct keyboard_notifier_param *kbd_param = data;
+
+    /* Null data */
+    if (kbd_param == NULL)
+    {
+        /* Log */
+        pr_alert("histogram: Failed to get kbd param");
+        return NOTIFY_DONE;
+    }
+
+    /* Ensure key down */
+    if (kbd_param->down == 0)
+        return NOTIFY_DONE;
+
+    /* Handle action */
+    if (kdb_handle_action(action, kbd_param->value) == 1)
+        return NOTIFY_OK;
+    return NOTIFY_DONE;
+}
+
+/**
+** \brief Notifier block for keyboard
+*/
+struct notifier_block kbd_notifier_blk = {
+	.notifier_call = kbd_notifier_fn
+};
+
+/**
 ** \brief Init the histogram linux kernel module
 **
 ** \return 0 on success, negative value otherwise
@@ -642,3 +626,9 @@ static void __exit histogram_exit(void)
 /* Register init and exit functions */
 module_init(histogram_init);
 module_exit(histogram_exit);
+
+/* LKM informations */
+MODULE_AUTHOR("Cesar Belley <cesar.belley@lse.epita.fr>");
+MODULE_DESCRIPTION("Histogram of written words.");
+MODULE_LICENSE("GPL v2");
+MODULE_VERSION("0.1");
